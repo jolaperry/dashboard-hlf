@@ -1,13 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, AlertCircle, List, Download } from 'lucide-react';
+import { RefreshCw, AlertCircle, List, Download, Lock, Unlock } from 'lucide-react';
 
 const DashboardGeneral = () => {
   const [data, setData] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [phpsessid, setPhpsessid] = useState('qjtqc4o6k4q63q4gdue9317fl9');
-  const [fechaFiltro, setFechaFiltro] = useState(new Date().toISOString().split('T')[0]);
+  
+  const today = new Date().toISOString().split('T')[0];
+  const [fechaDesde, setFechaDesde] = useState(today);
+  const [fechaHasta, setFechaHasta] = useState(today);
   const [autoRefresh, setAutoRefresh] = useState(true);
+
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const contrasenaSecreta = 'admin2026';
+
+  const handleUnlock = () => {
+    if (passwordInput === contrasenaSecreta) {
+      setIsUnlocked(true);
+      setPasswordInput('');
+    } else {
+      alert('Contraseña incorrecta');
+    }
+  };
 
   const cleanHTML = (str) => {
     if (typeof str !== 'string') return str;
@@ -38,7 +54,7 @@ const DashboardGeneral = () => {
       const response = await fetch(`${import.meta.env.VITE_API_URL}/api/llamadas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fecha: fechaFiltro, phpsessid: phpsessid })
+        body: JSON.stringify({ fechaDesde: fechaDesde, fechaHasta: fechaHasta, phpsessid: phpsessid })
       });
 
       const rawData = await response.json();
@@ -79,7 +95,7 @@ const DashboardGeneral = () => {
       }, 300000);
     }
     return () => clearInterval(interval);
-  }, [autoRefresh, phpsessid, fechaFiltro]);
+  }, [autoRefresh, phpsessid, fechaDesde, fechaHasta]);
 
   const timeToSeconds = (timeStr) => {
     if (!timeStr) return 0;
@@ -95,10 +111,18 @@ const DashboardGeneral = () => {
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
-  const agentesMap = new Map();
+  const agentesMapAcumulado = new Map();
+  const agentesMapDiario = new Map();
+
   data.forEach(ll => {
-    if (!agentesMap.has(ll.agente)) {
-      agentesMap.set(ll.agente, {
+    const fechaCorta = ll.fecha.split(' ')[0];
+    const keyDiario = `${fechaCorta}_${ll.agente}`;
+    const isAtendida = ll.estado === 'Atendida';
+    const segs = isAtendida ? timeToSeconds(ll.duracion) : 0;
+    const isCorta = isAtendida && segs < 15;
+
+    if (!agentesMapAcumulado.has(ll.agente)) {
+      agentesMapAcumulado.set(ll.agente, {
         nombre: ll.agente,
         modulo: ll.modulo,
         total: 0,
@@ -107,17 +131,35 @@ const DashboardGeneral = () => {
         cortas: 0
       });
     }
-    const ag = agentesMap.get(ll.agente);
-    ag.total += 1;
-    if (ll.estado === 'Atendida') {
-      ag.atendidas += 1;
-      const segs = timeToSeconds(ll.duracion);
-      ag.habladoSeg += segs;
-      if (segs < 15) ag.cortas += 1;
+    const agAcum = agentesMapAcumulado.get(ll.agente);
+    agAcum.total += 1;
+    if (isAtendida) {
+      agAcum.atendidas += 1;
+      agAcum.habladoSeg += segs;
+      if (isCorta) agAcum.cortas += 1;
+    }
+
+    if (!agentesMapDiario.has(keyDiario)) {
+      agentesMapDiario.set(keyDiario, {
+        fecha: fechaCorta,
+        nombre: ll.agente,
+        modulo: ll.modulo,
+        total: 0,
+        atendidas: 0,
+        habladoSeg: 0,
+        cortas: 0
+      });
+    }
+    const agDiario = agentesMapDiario.get(keyDiario);
+    agDiario.total += 1;
+    if (isAtendida) {
+      agDiario.atendidas += 1;
+      agDiario.habladoSeg += segs;
+      if (isCorta) agDiario.cortas += 1;
     }
   });
 
-  const agentesList = Array.from(agentesMap.values()).map(ag => ({
+  const formatearAgentes = (mapa) => Array.from(mapa.values()).map(ag => ({
     ...ag,
     tmo: ag.atendidas > 0 ? ag.habladoSeg / ag.atendidas : 0,
     contactabilidad: ag.total > 0 ? (ag.atendidas / ag.total) * 100 : 0,
@@ -128,11 +170,14 @@ const DashboardGeneral = () => {
     penlinea: 0
   }));
 
+  const agentesListAcumulado = formatearAgentes(agentesMapAcumulado);
+  const agentesListDiario = formatearAgentes(agentesMapDiario);
+
   const totalGlobal = data.length;
   const atendidasGlobal = data.filter(d => d.estado === 'Atendida').length;
   const habladoSegGlobal = data.filter(d => d.estado === 'Atendida').reduce((acc, curr) => acc + timeToSeconds(curr.duracion), 0);
   const tmoGlobal = atendidasGlobal > 0 ? habladoSegGlobal / atendidasGlobal : 0;
-  const cortasGlobal = agentesList.reduce((acc, curr) => acc + curr.cortas, 0);
+  const cortasGlobal = agentesListAcumulado.reduce((acc, curr) => acc + curr.cortas, 0);
   const contactGlobal = totalGlobal > 0 ? (atendidasGlobal / totalGlobal) * 100 : 0;
 
   const KpiBox = ({ title, value, metaText, metaSub, borderColor, textColor }) => (
@@ -149,15 +194,17 @@ const DashboardGeneral = () => {
   );
 
   const RankingList = ({ title, dataList, valueKey, formatKey, color }) => (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-100 flex flex-col h-64 overflow-hidden mt-2">
+    <div className="bg-white rounded-xl shadow-sm border border-slate-100 flex flex-col h-auto mt-2">
       <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
         <h4 className="text-[10px] font-bold uppercase text-slate-600">{title}</h4>
-        <div className="w-4 h-4 text-slate-400">↕</div>
       </div>
-      <div className="overflow-y-auto p-2 flex-1 scrollbar-thin">
+      <div className="p-2 flex-1">
         {dataList.sort((a, b) => b[valueKey] - a[valueKey]).map((item, idx) => (
           <div key={idx} className="flex justify-between items-center py-2 px-2 hover:bg-slate-50 rounded text-xs border-b border-slate-50 last:border-0">
-            <span className="text-slate-600 truncate w-32"><span className="text-slate-400 mr-2">{idx + 1}.</span> {item.nombre.split(' ').slice(0,2).join(' ')}</span>
+            <span className="text-slate-600 truncate w-32">
+              <span className="text-slate-400 mr-2">{idx + 1}.</span> 
+              {item.nombre.split(' ').slice(0,2).join(' ')}
+            </span>
             <span className="font-bold" style={{ color: color }}>
               {formatKey === 'time' ? formatSeconds(item[valueKey]) : 
                formatKey === 'pct' ? `${item[valueKey].toFixed(1)}%` : 
@@ -178,7 +225,7 @@ const DashboardGeneral = () => {
   };
 
   const getModuleStats = (modName) => {
-    const agentesMod = agentesList.filter(a => a.modulo === modName);
+    const agentesMod = agentesListAcumulado.filter(a => a.modulo === modName);
     const atendidas = agentesMod.reduce((acc, curr) => acc + curr.atendidas, 0);
     const habladoSeg = agentesMod.reduce((acc, curr) => acc + curr.habladoSeg, 0);
     const tmo = atendidas > 0 ? habladoSeg / atendidas : 0;
@@ -198,14 +245,47 @@ const DashboardGeneral = () => {
   return (
     <div className="p-4 bg-slate-50 min-h-screen font-sans">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-        <div className="flex gap-4">
+        <div className="flex gap-4 items-end">
+          
+          {isUnlocked ? (
+            <div className="flex flex-col">
+              <span className="text-[9px] font-bold text-slate-400 uppercase mb-1">SESIÓN (PHPSESSID)</span>
+              <div className="flex items-center gap-2">
+                <input type="text" value={phpsessid} onChange={(e) => setPhpsessid(e.target.value)} className="border border-slate-200 p-1.5 rounded text-xs w-48 outline-none focus:border-blue-400" />
+                <button onClick={() => setIsUnlocked(false)} className="text-slate-400 hover:text-slate-600" title="Bloquear configuración">
+                  <Unlock className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col">
+              <span className="text-[9px] font-bold text-slate-400 uppercase mb-1">DESBLOQUEAR SESIÓN</span>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Lock className="w-3 h-3 absolute left-2 top-1/2 transform -translate-y-1/2 text-slate-400" />
+                  <input 
+                    type="password" 
+                    placeholder="Contraseña" 
+                    value={passwordInput} 
+                    onChange={(e) => setPasswordInput(e.target.value)} 
+                    onKeyDown={(e) => e.key === 'Enter' && handleUnlock()}
+                    className="border border-slate-200 p-1.5 pl-7 rounded text-xs w-32 outline-none focus:border-blue-400" 
+                  />
+                </div>
+                <button onClick={handleUnlock} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded text-xs font-bold transition-colors">
+                  Ok
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col">
-            <span className="text-[9px] font-bold text-slate-400 uppercase mb-1">SESIÓN (PHPSESSID)</span>
-            <input type="password" value={phpsessid} onChange={(e) => setPhpsessid(e.target.value)} className="border border-slate-200 p-1.5 rounded text-xs w-48 outline-none focus:border-blue-400" />
+            <span className="text-[9px] font-bold text-slate-400 uppercase mb-1">FECHA DESDE</span>
+            <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} className="border border-slate-200 p-1.5 rounded text-xs outline-none focus:border-blue-400" />
           </div>
           <div className="flex flex-col">
-            <span className="text-[9px] font-bold text-slate-400 uppercase mb-1">FECHA DE REPORTE</span>
-            <input type="date" value={fechaFiltro} onChange={(e) => setFechaFiltro(e.target.value)} className="border border-slate-200 p-1.5 rounded text-xs outline-none focus:border-blue-400" />
+            <span className="text-[9px] font-bold text-slate-400 uppercase mb-1">FECHA HASTA</span>
+            <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} className="border border-slate-200 p-1.5 rounded text-xs outline-none focus:border-blue-400" />
           </div>
         </div>
         <button onClick={fetchAutomatedData} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-xs font-bold transition-all shadow-sm">
@@ -220,38 +300,38 @@ const DashboardGeneral = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-8 items-start">
         <div>
           <KpiBox title="PRODUCTIVIDAD" value="0.0%" metaText="Meta: >= 70%" metaSub="Hablado / Conexión" borderColor="#3b82f6" textColor="#1e40af" />
-          <RankingList title="PROD" dataList={agentesList} valueKey="prod" formatKey="pct" color="#3b82f6" />
+          <RankingList title="PROD" dataList={agentesListAcumulado} valueKey="prod" formatKey="pct" color="#3b82f6" />
         </div>
         <div>
           <KpiBox title="ADHERENCIA" value="0.0%" metaText="Meta: 90% - 105%" metaSub="Conex. / Planificado" borderColor="#10b981" textColor="#047857" />
-          <RankingList title="ADH" dataList={agentesList} valueKey="adh" formatKey="pct" color="#10b981" />
+          <RankingList title="ADH" dataList={agentesListAcumulado} valueKey="adh" formatKey="pct" color="#10b981" />
         </div>
         <div>
           <KpiBox title="OCUPACIÓN" value="0.0%" metaText="Meta: 95% - 105%" metaSub="(Habl.+ACW)/Conex." borderColor="#f97316" textColor="#c2410c" />
-          <RankingList title="OCUP" dataList={agentesList} valueKey="ocup" formatKey="pct" color="#f97316" />
+          <RankingList title="OCUP" dataList={agentesListAcumulado} valueKey="ocup" formatKey="pct" color="#f97316" />
         </div>
         <div>
           <KpiBox title="TMO GLOBAL" value={formatSeconds(tmoGlobal)} metaText="Meta: < 3 min" metaSub="Hablado / Atendidas" borderColor="#6366f1" textColor="#3730a3" />
-          <RankingList title="TMO" dataList={agentesList} valueKey="tmo" formatKey="time" color="#6366f1" />
+          <RankingList title="TMO" dataList={agentesListAcumulado} valueKey="tmo" formatKey="time" color="#6366f1" />
         </div>
         <div>
           <KpiBox title="P-ACW (AVG)" value="00:00" metaText="Meta: < 1 min" metaSub="ACW Total / Atendidas" borderColor="#64748b" textColor="#334155" />
-          <RankingList title="P-ACW" dataList={agentesList} valueKey="pacw" formatKey="time" color="#64748b" />
+          <RankingList title="P-ACW" dataList={agentesListAcumulado} valueKey="pacw" formatKey="time" color="#64748b" />
         </div>
         <div>
           <KpiBox title="CORTAS" value={cortasGlobal} metaText="Informativo" metaSub="Bajo umbral" borderColor="#ef4444" textColor="#b91c1c" />
-          <RankingList title="CORTAS" dataList={agentesList} valueKey="cortas" formatKey="num" color="#ef4444" />
+          <RankingList title="CORTAS" dataList={agentesListAcumulado} valueKey="cortas" formatKey="num" color="#ef4444" />
         </div>
         <div>
           <KpiBox title="P-ENLINEA (AVG)" value="00:00" metaText="Estados / Interacciones" metaSub="En Linea / Totales" borderColor="#d946ef" textColor="#86198f" />
-          <RankingList title="P-ENLINEA" dataList={agentesList} valueKey="penlinea" formatKey="time" color="#d946ef" />
+          <RankingList title="P-ENLINEA" dataList={agentesListAcumulado} valueKey="penlinea" formatKey="time" color="#d946ef" />
         </div>
         <div>
           <KpiBox title="CONTACTABILIDAD" value={`${contactGlobal.toFixed(1)}%`} metaText="Auxiliar" metaSub="Atend./Totales" borderColor="#0ea5e9" textColor="#0369a1" />
-          <RankingList title="CONTACT" dataList={agentesList} valueKey="contactabilidad" formatKey="pct" color="#0ea5e9" />
+          <RankingList title="CONTACT" dataList={agentesListAcumulado} valueKey="contactabilidad" formatKey="pct" color="#0ea5e9" />
         </div>
       </div>
 
@@ -305,11 +385,11 @@ const DashboardGeneral = () => {
         <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
           <div className="flex items-center gap-2 text-slate-700 font-bold uppercase text-sm tracking-wider">
             <List className="w-5 h-5" />
-            Detalle Principal
+            Detalle Principal (Diario)
           </div>
           <div className="flex items-center gap-3">
             <span className="bg-white border border-slate-200 px-3 py-1 rounded text-xs font-bold text-slate-600">
-              {agentesList.length} reg
+              {agentesListDiario.length} reg
             </span>
             <button className="flex items-center gap-1 text-teal-600 font-bold text-sm hover:text-teal-700 transition-colors">
               Descargar <Download className="w-4 h-4" />
@@ -320,7 +400,7 @@ const DashboardGeneral = () => {
           <table className="w-full text-left border-collapse whitespace-nowrap">
             <thead className="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200">
               <tr>
-                <th className="p-3 border-r border-slate-100">Fecha/Rango</th>
+                <th className="p-3 border-r border-slate-100">Fecha</th>
                 <th className="p-3 border-r border-slate-100">Agente</th>
                 <th className="p-3 border-r border-slate-100">Servicio</th>
                 <th className="p-3 border-r border-slate-100">Turno</th>
@@ -350,9 +430,16 @@ const DashboardGeneral = () => {
               </tr>
             </thead>
             <tbody className="text-[11px] font-medium text-slate-600 divide-y divide-slate-100">
-              {agentesList.sort((a, b) => a.nombre.localeCompare(b.nombre)).map((ag, idx) => (
+              {agentesListDiario
+                .sort((a, b) => {
+                  if (a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha);
+                  return a.nombre.localeCompare(b.nombre);
+                })
+                .map((ag, idx) => (
                 <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                  <td className="p-3 border-r border-slate-100 text-slate-500">{fechaFiltro}</td>
+                  <td className="p-3 border-r border-slate-100 text-slate-500 font-bold">
+                    {ag.fecha}
+                  </td>
                   <td className="p-3 border-r border-slate-100 font-bold text-blue-600 whitespace-nowrap">{ag.nombre}</td>
                   <td className="p-3 border-r border-slate-100 text-slate-500">{ag.modulo}</td>
                   <td className="p-3 border-r border-slate-100 text-slate-400">08:00:00 - 18:00:00</td>
@@ -381,7 +468,7 @@ const DashboardGeneral = () => {
                   <td className="p-3 font-bold text-red-600 text-center">0%</td>
                 </tr>
               ))}
-              {agentesList.length === 0 && (
+              {agentesListDiario.length === 0 && (
                 <tr>
                   <td colSpan="27" className="p-6 text-center text-slate-400 italic">No hay datos para mostrar</td>
                 </tr>
