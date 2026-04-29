@@ -7,7 +7,7 @@ import DashboardTrafico from './pages/DashboardTrafico';
 
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <div className="flex flex-col min-h-screen">
         <Header />
         <main className="max-w-[1920px] mx-auto px-4 py-6 w-full flex-grow relative">
@@ -19,7 +19,7 @@ function App() {
           </Routes>
         </main>
       </div>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 
