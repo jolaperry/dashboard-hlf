@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import DashboardGeneral from './pages/DashboardGeneral';
 import DashboardAuxiliar from './pages/DashboardAuxiliar';
