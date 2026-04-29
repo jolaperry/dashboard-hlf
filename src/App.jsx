@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import DashboardGeneral from './pages/DashboardGeneral';
 import DashboardAuxiliar from './pages/DashboardAuxiliar';
@@ -7,7 +7,7 @@ import DashboardTrafico from './pages/DashboardTrafico';
 
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <div className="flex flex-col min-h-screen">
         <Header />
         <main className="max-w-[1920px] mx-auto px-4 py-6 w-full flex-grow relative">
@@ -19,7 +19,7 @@ function App() {
           </Routes>
         </main>
       </div>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
 
