@@ -3,6 +3,7 @@ import Header from './components/Header';
 import DashboardGeneral from './pages/DashboardGeneral';
 import MonitorGeneral from './pages/MonitorGeneral';
 import Horarios from './pages/Horarios'; // Añadir import
+import AnalyticHora from './pages/AnalyticHora';
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
             <Route path="/" element={<DashboardGeneral />} />
             <Route path="/monitor" element={<MonitorGeneral />} />
             <Route path="/horarios" element={<Horarios />} />
+            <Route path="/analytic-hora" element={<AnalyticHora />} />
           </Routes>
         </main>
       </div>

@@ -21,7 +21,7 @@ const MonitorGeneral = () => {
     };
 
     fetchMonitorData();
-    const interval = setInterval(fetchMonitorData, 5000);
+    const interval = setInterval(fetchMonitorData, 1000);
     return () => clearInterval(interval);
   }, []);
 

@@ -1,6 +1,49 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, AlertCircle, List, Activity, Zap, Target, Gauge, Timer, Coffee, AlertTriangle, Radio, Phone } from 'lucide-react';
 
+const WSP_STORAGE_KEY = 'hlf-wsp-agents';
+
+// Horarios planificados por agente (extraídos de HorarioAgentes.xlsx).
+// Cada array es [domingo, lunes, martes, miércoles, jueves, viernes, sábado]
+// y los valores están en segundos (8h = 28800s, 9h = 32400s). Total semanal = 42 hrs.
+const H8 = 8 * 3600;
+const H9 = 9 * 3600;
+const HORARIOS_AGENTES_SEG = {
+  'JOHANNA HERRERA':     [0, H9, H8, H9, H8, H8, 0],
+  'DIEGO CEA':           [0, H9, H9, H8, H8, H8, 0],
+  'LESLI AGUDELO':       [0, H9, H8, H9, H8, H8, 0],
+  'PAOLA HERRERA':       [0, H8, H9, H9, H8, H8, 0],
+  'YESSENIA GONZALEZ':   [0, H8, H8, H8, H9, H9, 0],
+  'ADRIAN MANZANILLA':   [0, H9, H9, H8, H8, H8, 0],
+  'EDITH OSSANDON':      [0, H9, H8, H9, H8, H8, 0],
+  'MARIA FARIA':         [0, H8, H9, H8, H8, H9, 0],
+  'CRISTINA BARON':      [0, H8, H9, H8, H9, H8, 0],
+  'LORENA RODRIGUEZ':    [0, H8, H8, H8, H9, H9, 0],
+  'ANDREINA VILLALON':   [0, H9, H8, H9, H8, H8, 0],
+  'OSCAR HIDALGO':       [0, H9, H9, H8, H8, H8, 0],
+  'CRISTOBAL FERNANDEZ': [0, H8, H8, H8, H9, H9, 0],
+  'CARLA GARAY':         [0, H8, H9, H8, H8, H9, 0],
+  'MIRIAM BRUGES':       [0, H8, H8, H9, H9, H8, 0],
+  'JORGE YANEZ':         [0, H9, H9, H8, H8, H8, 0],
+};
+
+const getTurnoPlanificadoSeg = (agente, fechaStr) => {
+  const horario = HORARIOS_AGENTES_SEG[agente];
+  if (!horario || !fechaStr) return 0;
+  const parts = String(fechaStr).split('-').map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return 0;
+  const [y, m, d] = parts;
+  const dt = new Date(y, m - 1, d);
+  if (isNaN(dt.getTime())) return 0;
+  return horario[dt.getDay()] || 0;
+};
+
+const WhatsappIcon = ({ className }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+    <path d="M19.05 4.91A10 10 0 0 0 12 2a10 10 0 0 0-8.6 15.06L2 22l5.06-1.33A10 10 0 0 0 22 12a10 10 0 0 0-2.95-7.09Zm-7.05 15.4a8.3 8.3 0 0 1-4.23-1.16l-.3-.18-3 .79.8-2.93-.2-.3A8.3 8.3 0 1 1 20.32 12 8.3 8.3 0 0 1 12 20.31Zm4.55-6.22c-.25-.13-1.47-.72-1.7-.8s-.4-.13-.56.13-.64.8-.78.97-.29.18-.54.06a6.8 6.8 0 0 1-2-1.24 7.5 7.5 0 0 1-1.39-1.73c-.14-.25 0-.38.11-.5s.25-.29.37-.43a1.7 1.7 0 0 0 .25-.41.46.46 0 0 0 0-.43c-.06-.13-.56-1.36-.77-1.86s-.41-.42-.56-.43h-.48a.92.92 0 0 0-.67.31 2.81 2.81 0 0 0-.87 2.08 4.87 4.87 0 0 0 1 2.59 11.16 11.16 0 0 0 4.27 3.77 14.3 14.3 0 0 0 1.43.53 3.43 3.43 0 0 0 1.58.1 2.58 2.58 0 0 0 1.7-1.2 2.1 2.1 0 0 0 .15-1.2c-.07-.11-.23-.18-.48-.31Z" />
+  </svg>
+);
+
 const DashboardGeneral = () => {
   const [dataLlamadas, setDataLlamadas] = useState([]);
   const [dataAgentes, setDataAgentes] = useState([]);
@@ -8,12 +51,35 @@ const DashboardGeneral = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Santiago',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
   const [fechaDesde, setFechaDesde] = useState(today);
   const [fechaHasta, setFechaHasta] = useState(today);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [filtroEjecutivo, setFiltroEjecutivo] = useState('');
   const [filtroModulo, setFiltroModulo] = useState('');
+
+  const [wspAgents, setWspAgents] = useState(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const raw = localStorage.getItem(WSP_STORAGE_KEY);
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch {
+      return new Set();
+    }
+  });
+
+  const toggleWsp = (agente) => {
+    setWspAgents(prev => {
+      const next = new Set(prev);
+      if (next.has(agente)) next.delete(agente);
+      else next.add(agente);
+      try { localStorage.setItem(WSP_STORAGE_KEY, JSON.stringify(Array.from(next))); } catch {}
+      return next;
+    });
+  };
 
   const agentesExcluidos = ['BELFRED BELIS', 'KATYA CACERES', 'OLIVER FLACCO'];
 
@@ -356,17 +422,17 @@ const DashboardGeneral = () => {
   });
 
 
-  const turnoPlanificadoSegundos = 32400;
-
   const filasCalculadas = Array.from(cruceDiarioMap.values()).map(fila => {
     let secAcw = Math.max(0, fila.gestionLlamadaSeg - fila.habladoSeg);
     fila.acwSeg = secAcw;
 
+    const turnoPlanSeg = getTurnoPlanificadoSeg(fila.agenteDisplay, fila.fecha);
+
     let divisorProd = fila.conexSeg - fila.almSeg;
     let prod = divisorProd > 0 ? (fila.habladoSeg / divisorProd) * 100 : 0;
-    
+
     let ocup = fila.conexSeg > 0 ? ((fila.habladoSeg + fila.acwSeg) / fila.conexSeg) * 100 : 0;
-    let adh = turnoPlanificadoSegundos > 0 ? (fila.conexSeg / turnoPlanificadoSegundos) * 100 : 0;
+    let adh = turnoPlanSeg > 0 ? (fila.conexSeg / turnoPlanSeg) * 100 : 0;
     let contac = fila.llamadasTotales > 0 ? (fila.llamadasAtendidas / fila.llamadasTotales) * 100 : 0;
     
     let tmo = fila.llamadasAtendidas > 0 ? (fila.habladoSeg / fila.llamadasAtendidas) : 0;
@@ -375,6 +441,7 @@ const DashboardGeneral = () => {
 
     return {
       ...fila,
+      turnoPlanSeg,
       prod: isNaN(prod) ? 0 : Math.min(prod, 100),
       ocup: isNaN(ocup) ? 0 : Math.min(ocup, 100),
       adh: isNaN(adh) ? 0 : Math.min(adh, 100),
@@ -393,7 +460,7 @@ const DashboardGeneral = () => {
     return true;
   });
 
-  let gConex = 0, gHablado = 0, gAcw = 0, gAlm = 0, gTotales = 0, gAtendidas = 0, gCortas = 0, gEnLinea = 0;
+  let gConex = 0, gHablado = 0, gAcw = 0, gAlm = 0, gTotales = 0, gAtendidas = 0, gCortas = 0, gEnLinea = 0, gPlanSeg = 0;
 
   filasFiltradas.forEach(f => {
     gConex += f.conexSeg;
@@ -404,9 +471,10 @@ const DashboardGeneral = () => {
     gAtendidas += f.llamadasAtendidas;
     gCortas += f.cortas;
     gEnLinea += f.enLineaSeg;
+    gPlanSeg += f.turnoPlanSeg;
   });
 
-  const gPlanificado = filasFiltradas.length > 0 ? filasFiltradas.length * turnoPlanificadoSegundos : 1;
+  const gPlanificado = gPlanSeg > 0 ? gPlanSeg : 1;
   const rawGProd = (gConex - gAlm) > 0 ? (gHablado / (gConex - gAlm)) * 100 : 0;
   const rawGOcup = gConex > 0 ? ((gHablado + gAcw) / gConex) * 100 : 0;
   const rawGAdh = (gConex / gPlanificado) * 100;
@@ -453,13 +521,14 @@ const DashboardGeneral = () => {
 
   const getModuleStats = (modName) => {
     const agentesMod = filasCalculadas.filter(a => a.modulo === modName);
-    let mConex=0, mHablado=0, mAcw=0, mAlm=0, mAtendidas=0, mCortas=0;
+    let mConex=0, mHablado=0, mAcw=0, mAlm=0, mAtendidas=0, mCortas=0, mPlanSeg=0;
 
     agentesMod.forEach(f => {
       mConex+=f.conexSeg; mHablado+=f.habladoSeg; mAcw+=f.acwSeg; mAlm+=f.almSeg; mAtendidas+=f.llamadasAtendidas; mCortas+=f.cortas;
+      mPlanSeg += f.turnoPlanSeg;
     });
 
-    const mPlanificado = agentesMod.length > 0 ? agentesMod.length * turnoPlanificadoSegundos : 1;
+    const mPlanificado = mPlanSeg > 0 ? mPlanSeg : 1;
     const mProd = (mConex - mAlm) > 0 ? (mHablado / (mConex - mAlm)) * 100 : 0;
     const mOcup = mConex > 0 ? ((mHablado + mAcw) / mConex) * 100 : 0;
     const mAdh = (mConex / mPlanificado) * 100;
@@ -656,7 +725,26 @@ const DashboardGeneral = () => {
                 .map((ag, idx) => (
                 <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
                   <td className="px-4 py-2.5 text-left text-slate-500 tabular-nums font-mono">{ag.fecha}</td>
-                  <td className="px-4 py-2.5 text-left font-bold text-white">{ag.agenteDisplay}</td>
+                  <td className="px-4 py-2.5 text-left">
+                    <div className="flex items-center gap-2 group/wsp">
+                      <button
+                        type="button"
+                        onClick={() => toggleWsp(ag.agenteDisplay)}
+                        title={wspAgents.has(ag.agenteDisplay) ? 'Quitar marcador WhatsApp' : 'Marcar con WhatsApp'}
+                        className={`shrink-0 transition-all ${wspAgents.has(ag.agenteDisplay) ? 'text-emerald-400 drop-shadow-[0_0_4px_rgba(16,185,129,0.7)]' : 'text-slate-700 opacity-30 hover:opacity-100 hover:text-emerald-400 group-hover/wsp:opacity-60'}`}
+                      >
+                        <WhatsappIcon className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFiltroEjecutivo(filtroEjecutivo === ag.agenteDisplay ? '' : ag.agenteDisplay)}
+                        title={filtroEjecutivo === ag.agenteDisplay ? 'Quitar filtro' : 'Filtrar por este ejecutivo'}
+                        className={`font-bold text-left transition-colors ${filtroEjecutivo === ag.agenteDisplay ? 'text-cyan-300 underline decoration-dotted underline-offset-4' : 'text-white hover:text-cyan-300 hover:underline hover:decoration-dotted hover:underline-offset-4'}`}
+                      >
+                        {ag.agenteDisplay}
+                      </button>
+                    </div>
+                  </td>
                   <td className="px-4 py-2.5 text-right tabular-nums font-medium text-slate-200">{formatSeconds(ag.conexSeg)}</td>
                   <td className="px-4 py-2.5 text-center tabular-nums text-slate-300">{ag.llamadasTotales}</td>
                   <td className="px-4 py-2.5 text-center tabular-nums font-bold text-emerald-400">{ag.llamadasAtendidas}</td>
