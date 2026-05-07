@@ -1,7 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, AlertCircle, List, Activity, Zap, Target, Gauge, Timer, Coffee, AlertTriangle, Radio, Phone } from 'lucide-react';
 
-const WSP_STORAGE_KEY = 'hlf-wsp-agents';
+const normalizeFechaHorario = (raw) => {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  let m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;
+  m = s.match(/(\d{1,2})-(\d{1,2})-(\d{4})/);
+  if (m) return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;
+  return null;
+};
 
 // Horarios planificados por agente (extraídos de HorarioAgentes.xlsx).
 // Cada array es [domingo, lunes, martes, miércoles, jueves, viernes, sábado]
@@ -61,25 +71,7 @@ const DashboardGeneral = () => {
   const [filtroEjecutivo, setFiltroEjecutivo] = useState('');
   const [filtroModulo, setFiltroModulo] = useState('');
 
-  const [wspAgents, setWspAgents] = useState(() => {
-    if (typeof window === 'undefined') return new Set();
-    try {
-      const raw = localStorage.getItem(WSP_STORAGE_KEY);
-      return new Set(raw ? JSON.parse(raw) : []);
-    } catch {
-      return new Set();
-    }
-  });
-
-  const toggleWsp = (agente) => {
-    setWspAgents(prev => {
-      const next = new Set(prev);
-      if (next.has(agente)) next.delete(agente);
-      else next.add(agente);
-      try { localStorage.setItem(WSP_STORAGE_KEY, JSON.stringify(Array.from(next))); } catch {}
-      return next;
-    });
-  };
+  const [horariosWsp, setHorariosWsp] = useState(new Map());
 
   const agentesExcluidos = ['BELFRED BELIS', 'KATYA CACERES', 'OLIVER FLACCO'];
 
@@ -274,6 +266,36 @@ const DashboardGeneral = () => {
     if (autoRefresh) interval = setInterval(fetchAutomatedData, 60000);
     return () => clearInterval(interval);
   }, [autoRefresh, fechaDesde, fechaHasta]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchHorarios = async () => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/horarios`);
+        if (!res.ok) return;
+        const result = await res.json();
+        const map = new Map();
+        (result.whatsapp || []).forEach(row => {
+          const fechaNorm = normalizeFechaHorario(row.fecha);
+          if (!fechaNorm) return;
+          const set = map.get(fechaNorm) || new Set();
+          const ag = normalizeAgentName(row.agente);
+          if (ag && ag !== 'DESCONOCIDO') set.add(ag);
+          if (row.reemplazo) {
+            const re = normalizeAgentName(row.reemplazo);
+            if (re && re !== 'DESCONOCIDO' && HORARIOS_AGENTES_SEG[re]) set.add(re);
+          }
+          if (set.size) map.set(fechaNorm, set);
+        });
+        if (!cancelled) setHorariosWsp(map);
+      } catch (err) {
+        console.error('Horarios WSP fetch error:', err);
+      }
+    };
+    fetchHorarios();
+    const interval = setInterval(fetchHorarios, 5 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   const cruceDiarioMap = new Map();
 
@@ -726,15 +748,15 @@ const DashboardGeneral = () => {
                 <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
                   <td className="px-4 py-2.5 text-left text-slate-500 tabular-nums font-mono">{ag.fecha}</td>
                   <td className="px-4 py-2.5 text-left">
-                    <div className="flex items-center gap-2 group/wsp">
-                      <button
-                        type="button"
-                        onClick={() => toggleWsp(ag.agenteDisplay)}
-                        title={wspAgents.has(ag.agenteDisplay) ? 'Quitar marcador WhatsApp' : 'Marcar con WhatsApp'}
-                        className={`shrink-0 transition-all ${wspAgents.has(ag.agenteDisplay) ? 'text-emerald-400 drop-shadow-[0_0_4px_rgba(16,185,129,0.7)]' : 'text-slate-700 opacity-30 hover:opacity-100 hover:text-emerald-400 group-hover/wsp:opacity-60'}`}
-                      >
-                        <WhatsappIcon className="w-3.5 h-3.5" />
-                      </button>
+                    <div className="flex items-center gap-2">
+                      {horariosWsp.get(ag.fecha)?.has(ag.agenteDisplay) && (
+                        <span
+                          title={`WhatsApp asignado el ${ag.fecha} (según planificación)`}
+                          className="shrink-0 text-emerald-400 drop-shadow-[0_0_4px_rgba(16,185,129,0.7)]"
+                        >
+                          <WhatsappIcon className="w-3.5 h-3.5" />
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => setFiltroEjecutivo(filtroEjecutivo === ag.agenteDisplay ? '' : ag.agenteDisplay)}
