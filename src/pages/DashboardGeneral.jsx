@@ -48,6 +48,38 @@ const getTurnoPlanificadoSeg = (agente, fechaStr) => {
   return horario[dt.getDay()] || 0;
 };
 
+// Tokens de cada agente conocido para hacer matching tolerante por apellido/nombre.
+const AGENTES_TOKENS = Object.keys(HORARIOS_AGENTES_SEG).map(fullName => ({
+  fullName,
+  tokens: fullName.split(/\s+/).filter(t => t.length > 2),
+}));
+
+// Dado un nombre escrito de cualquier forma (con acentos, sólo apellido, orden invertido,
+// abreviaturas), devuelve el nombre canónico del agente cuyos tokens más coincidan.
+const matchAgenteByTokens = (rawName) => {
+  if (!rawName) return null;
+  const cleaned = String(rawName)
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length > 2);
+  if (cleaned.length === 0) return null;
+  const inputSet = new Set(cleaned);
+
+  let best = null;
+  let bestScore = 0;
+  for (const { fullName, tokens } of AGENTES_TOKENS) {
+    let score = 0;
+    for (const t of tokens) if (inputSet.has(t)) score += 1;
+    if (score > bestScore) {
+      bestScore = score;
+      best = fullName;
+    }
+  }
+  return bestScore >= 1 ? best : null;
+};
+
 const WhatsappIcon = ({ className }) => (
   <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
     <path d="M19.05 4.91A10 10 0 0 0 12 2a10 10 0 0 0-8.6 15.06L2 22l5.06-1.33A10 10 0 0 0 22 12a10 10 0 0 0-2.95-7.09Zm-7.05 15.4a8.3 8.3 0 0 1-4.23-1.16l-.3-.18-3 .79.8-2.93-.2-.3A8.3 8.3 0 1 1 20.32 12 8.3 8.3 0 0 1 12 20.31Zm4.55-6.22c-.25-.13-1.47-.72-1.7-.8s-.4-.13-.56.13-.64.8-.78.97-.29.18-.54.06a6.8 6.8 0 0 1-2-1.24 7.5 7.5 0 0 1-1.39-1.73c-.14-.25 0-.38.11-.5s.25-.29.37-.43a1.7 1.7 0 0 0 .25-.41.46.46 0 0 0 0-.43c-.06-.13-.56-1.36-.77-1.86s-.41-.42-.56-.43h-.48a.92.92 0 0 0-.67.31 2.81 2.81 0 0 0-.87 2.08 4.87 4.87 0 0 0 1 2.59 11.16 11.16 0 0 0 4.27 3.77 14.3 14.3 0 0 0 1.43.53 3.43 3.43 0 0 0 1.58.1 2.58 2.58 0 0 0 1.7-1.2 2.1 2.1 0 0 0 .15-1.2c-.07-.11-.23-.18-.48-.31Z" />
@@ -279,11 +311,11 @@ const DashboardGeneral = () => {
           const fechaNorm = normalizeFechaHorario(row.fecha);
           if (!fechaNorm) return;
           const set = map.get(fechaNorm) || new Set();
-          const ag = normalizeAgentName(row.agente);
-          if (ag && ag !== 'DESCONOCIDO') set.add(ag);
+          const ag = matchAgenteByTokens(row.agente);
+          if (ag) set.add(ag);
           if (row.reemplazo) {
-            const re = normalizeAgentName(row.reemplazo);
-            if (re && re !== 'DESCONOCIDO' && HORARIOS_AGENTES_SEG[re]) set.add(re);
+            const re = matchAgenteByTokens(row.reemplazo);
+            if (re) set.add(re);
           }
           if (set.size) map.set(fechaNorm, set);
         });
