@@ -1,15 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, AlertCircle, List, Activity, Zap, Target, Gauge, Timer, Coffee, AlertTriangle, Radio, Phone } from 'lucide-react';
 
-const normalizeFechaHorario = (raw) => {
+const normalizeFechaHorario = (raw, fallbackYear) => {
   if (!raw) return null;
   const s = String(raw).trim();
-  let m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  const yr = fallbackYear || new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Santiago', year: 'numeric'
+  }).format(new Date());
+  let m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
   m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (m) return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;
   m = s.match(/(\d{1,2})-(\d{1,2})-(\d{4})/);
   if (m) return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;
+  // Sin año: DD-MM o DD/MM → asume año actual de Chile
+  m = s.match(/^(\d{1,2})[-\/](\d{1,2})$/);
+  if (m) return `${yr}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;
   return null;
 };
 
