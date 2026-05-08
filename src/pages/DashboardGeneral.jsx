@@ -1,6 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, AlertCircle, List, Activity, Zap, Target, Gauge, Timer, Coffee, AlertTriangle, Radio, Phone } from 'lucide-react';
 
+// Hora actual en Chile (0–23). Usamos esto para apagar las recargas automáticas
+// fuera del horario laboral y dejar que Render se duerma por inactividad.
+const getChileHour = () => {
+  const h = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Santiago', hour: 'numeric', hour12: false
+  }).format(new Date());
+  return parseInt(h, 10);
+};
+const isHoraLaboral = () => {
+  const h = getChileHour();
+  return h >= 7 && h < 21; // 07:00 a 20:59 — corta a las 21:00
+};
+
 const normalizeFechaHorario = (raw, fallbackYear) => {
   if (!raw) return null;
   const s = String(raw).trim();
@@ -300,8 +313,10 @@ const DashboardGeneral = () => {
 
   useEffect(() => {
     fetchAutomatedData();
-    let interval;
-    if (autoRefresh) interval = setInterval(fetchAutomatedData, 60000);
+    if (!autoRefresh) return;
+    const interval = setInterval(() => {
+      if (isHoraLaboral()) fetchAutomatedData();
+    }, 60000);
     return () => clearInterval(interval);
   }, [autoRefresh, fechaDesde, fechaHasta]);
 
@@ -331,7 +346,9 @@ const DashboardGeneral = () => {
       }
     };
     fetchHorarios();
-    const interval = setInterval(fetchHorarios, 5 * 60 * 1000);
+    const interval = setInterval(() => {
+      if (isHoraLaboral()) fetchHorarios();
+    }, 5 * 60 * 1000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
@@ -786,15 +803,15 @@ const DashboardGeneral = () => {
                 <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
                   <td className="px-4 py-2.5 text-left text-slate-500 tabular-nums font-mono">{ag.fecha}</td>
                   <td className="px-4 py-2.5 text-left">
-                    <div className="flex items-center gap-2">
-                      {horariosWsp.get(ag.fecha)?.has(ag.agenteDisplay) && (
-                        <span
-                          title={`WhatsApp asignado el ${ag.fecha} (según planificación)`}
-                          className="shrink-0 text-emerald-400 drop-shadow-[0_0_4px_rgba(16,185,129,0.7)]"
-                        >
-                          <WhatsappIcon className="w-3.5 h-3.5" />
-                        </span>
-                      )}
+                    <div className="flex items-center">
+                      <span
+                        className="w-5 shrink-0 inline-flex items-center justify-center"
+                        title={horariosWsp.get(ag.fecha)?.has(ag.agenteDisplay) ? `WhatsApp asignado el ${ag.fecha} (según planificación)` : undefined}
+                      >
+                        {horariosWsp.get(ag.fecha)?.has(ag.agenteDisplay) && (
+                          <WhatsappIcon className="w-3.5 h-3.5 text-emerald-400 drop-shadow-[0_0_4px_rgba(16,185,129,0.7)]" />
+                        )}
+                      </span>
                       <button
                         type="button"
                         onClick={() => setFiltroEjecutivo(filtroEjecutivo === ag.agenteDisplay ? '' : ag.agenteDisplay)}

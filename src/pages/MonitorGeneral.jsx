@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, PhoneCall, UserCheck, Coffee, PowerOff, Clock, MessageSquare, ShieldCheck, Bath, GraduationCap, Utensils, FileText } from 'lucide-react';
 
+const isHoraLaboral = () => {
+  const h = parseInt(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Santiago', hour: 'numeric', hour12: false
+  }).format(new Date()), 10);
+  return h >= 7 && h < 21; // 07:00 a 20:59 — corta a las 21:00 para que Render se duerma
+};
+
 const MonitorGeneral = () => {
   const [data, setData] = useState([[], [], [], []]);
   const [lastUpdate, setLastUpdate] = useState(new Date());
@@ -21,7 +28,9 @@ const MonitorGeneral = () => {
     };
 
     fetchMonitorData();
-    const interval = setInterval(fetchMonitorData, 1000);
+    const interval = setInterval(() => {
+      if (isHoraLaboral()) fetchMonitorData();
+    }, 1000);
     return () => clearInterval(interval);
   }, []);
 
