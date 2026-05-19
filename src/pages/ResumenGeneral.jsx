@@ -92,6 +92,7 @@ const ResumenGeneral = () => {
   );
   const [filas, setFilas] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [progreso, setProgreso] = useState({ actual: 0, total: 0 });
   const [error, setError] = useState(null);
   const [filtroAgente, setFiltroAgente] = useState('');
 
@@ -99,46 +100,63 @@ const ResumenGeneral = () => {
   const fechaDesde = `${mes}-01`;
   const fechaHasta = `${mes}-${String(new Date(anio, mesNum, 0).getDate()).padStart(2, '0')}`;
 
+  // Divide el mes en chunks de 7 días para no saturar Render con un solo request
+  const buildChunks = (desde, hasta) => {
+    const chunks = [];
+    let cur = new Date(desde);
+    const end = new Date(hasta);
+    while (cur <= end) {
+      const chunkStart = cur.toISOString().slice(0, 10);
+      const chunkEnd = new Date(Math.min(cur.getTime() + 6 * 86400000, end.getTime()))
+        .toISOString().slice(0, 10);
+      chunks.push({ from: chunkStart, to: chunkEnd });
+      cur = new Date(cur.getTime() + 7 * 86400000);
+    }
+    return chunks;
+  };
+
+  const processRows = (rows, map, fallbackDate) => {
+    rows.forEach(row => {
+      const ag = getAgent(row);
+      if (ag === 'DESCONOCIDO' || AGENTES_EXCLUIDOS.includes(ag)) return;
+      const fecha = extractDate(row, fallbackDate);
+      const estado = cleanHTML(row.Estado || row['0'] || row[0] || '');
+      const rowStr = JSON.stringify(row).toUpperCase();
+      const atendida = isValid(estado, rowStr);
+      const rawTime = row['10'] || row[10] || row['Tiempo de Llamada'] || row['Duracion'];
+      let durStr = '00:00:00';
+      if (rawTime) {
+        const match = String(rawTime).match(/>\s*([^<]+)\s*</);
+        durStr = match?.[1]?.trim() ?? cleanHTML(rawTime);
+      }
+      const dur = timeToSeconds(durStr);
+      const key = `${fecha}||${ag}`;
+      if (!map.has(key)) map.set(key, { agente: ag, fecha, at: 0, tAt: 0, noAt: 0, tNoAt: 0 });
+      const r = map.get(key);
+      if (atendida) { r.at++; r.tAt += dur; } else { r.noAt++; r.tNoAt += dur; }
+    });
+  };
+
   const fetchData = async () => {
     if (loading) return;
     setLoading(true);
     setError(null);
+    setFilas([]);
+    const chunks = buildChunks(fechaDesde, fechaHasta);
+    setProgreso({ actual: 0, total: chunks.length });
+    const map = new Map();
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/llamadas`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fechaDesde, fechaHasta })
-      });
-      const raw = await res.json();
-      if (!raw.data) throw new Error('Sin datos de llamadas');
-
-      const map = new Map();
-      raw.data.forEach(row => {
-        const ag = getAgent(row);
-        if (ag === 'DESCONOCIDO' || AGENTES_EXCLUIDOS.includes(ag)) return;
-
-        const fecha = extractDate(row, fechaDesde);
-        const estado = cleanHTML(row.Estado || row['0'] || row[0] || '');
-        const rowStr = JSON.stringify(row).toUpperCase();
-        const atendida = isValid(estado, rowStr);
-
-        const rawTime = row['10'] || row[10] || row['Tiempo de Llamada'] || row['Duracion'];
-        let durStr = '00:00:00';
-        if (rawTime) {
-          const match = String(rawTime).match(/>\s*([^<]+)\s*</);
-          durStr = match?.[1]?.trim() ?? cleanHTML(rawTime);
-        }
-        const dur = timeToSeconds(durStr);
-
-        const key = `${fecha}||${ag}`;
-        if (!map.has(key)) {
-          map.set(key, { agente: ag, fecha, at: 0, tAt: 0, noAt: 0, tNoAt: 0 });
-        }
-        const r = map.get(key);
-        if (atendida) { r.at++; r.tAt += dur; }
-        else { r.noAt++; r.tNoAt += dur; }
-      });
-
+      for (let i = 0; i < chunks.length; i++) {
+        const { from, to } = chunks[i];
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/llamadas`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fechaDesde: from, fechaHasta: to })
+        });
+        const raw = await res.json();
+        if (raw.data) processRows(raw.data, map, from);
+        setProgreso({ actual: i + 1, total: chunks.length });
+      }
       setFilas(Array.from(map.values()).map(r => ({
         ...r,
         total: r.at + r.noAt,
@@ -298,8 +316,16 @@ const ResumenGeneral = () => {
               )}
               {loading && (
                 <tr>
-                  <td colSpan="9" className="px-4 py-12 text-center text-slate-500 text-xs uppercase tracking-widest font-bold animate-pulse">
-                    Cargando datos del mes...
+                  <td colSpan="9" className="px-4 py-12 text-center">
+                    <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-3 animate-pulse">
+                      Cargando semana {progreso.actual} de {progreso.total}...
+                    </p>
+                    <div className="mx-auto w-48 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                        style={{ width: progreso.total ? `${(progreso.actual / progreso.total) * 100}%` : '0%' }}
+                      />
+                    </div>
                   </td>
                 </tr>
               )}
