@@ -56,6 +56,8 @@ export default function Header() {
         <NavLink to="/analytic-hora" className={({ isActive }) => isActive ? activeStyle : inactiveStyle}>Analytics</NavLink>
         <NavLink to="/monitor" className={({ isActive }) => isActive ? activeStyle : inactiveStyle}>Monitor en Vivo</NavLink>
         <NavLink to="/horarios" className={({ isActive }) => isActive ? activeStyle : inactiveStyle}>Horarios</NavLink>
+        <NavLink to="/resumen-general" className={({ isActive }) => isActive ? activeStyle : inactiveStyle}>Resumen General</NavLink>
+        <NavLink to="/tiempos-estados" className={({ isActive }) => isActive ? activeStyle : inactiveStyle}>Tiempos Estados</NavLink>
       </nav>
     </header>
   );
